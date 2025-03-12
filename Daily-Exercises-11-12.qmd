@@ -1,0 +1,189 @@
+---
+title: "Daily exercises 11-12"
+subtitle: "Exploratory Data Analysis and Linear Regression in R"
+author: "Yazeed"
+date: "`r Sys.Date()`"
+format: 
+  html:
+    self-contained: true
+    toc: true
+execute:
+  echo: true
+output-dir: "docs"
+theme: journal
+editor: visual
+---
+
+## 
+
+```{r}
+#| include: false
+library(tidyverse)
+library(tidymodels)
+library(ggpubr)
+library(broom)
+```
+
+## **Part 1: Normality Testing**
+
+1.  **Load the airquality dataset in R. What does this dataset represent? Explore its structure using functions like `str()` and `summary()`.**
+
+```{r}
+data("airquality")
+str(airquality)
+summary(airquality)
+```
+
+The `airquality` dataset consists of 153 observations and 6 variables related to air quality measurements recorded in New York from May to September 1973. The dataset includes daily readings of ozone levels, solar radiation, wind speed, and temperature, along with the corresponding month and day of measurement. it has some missing values in Ozone Solar.R columns. Ozone levels have a median of 31.5 ppb, with high variability. Solar Radiation varies widely, with a median of 205 Langleys. Wind speeds have a relatively small spread (most values between 7.4 and 11.5 mph). Temperature is normally distributed, with a median of 79°F.
+
+2.  **Perform a Shapiro-Wilk normality test on the following variables: `Ozone`, `Temp`, `Solar.R`, and `Wind.`**
+
+```{r}
+#Shapiro-Wilk Normality Test
+shapiro.test(airquality$Ozone)
+shapiro.test(airquality$Temp)
+shapiro.test(airquality$Solar.R)
+shapiro.test(airquality$Wind)
+```
+
+3.  **What is the purpose of the Shapiro-Wilk test?**
+
+    The Shapiro-Wilk test checks whether a dataset follows a normal distribution.
+
+4.  **What are the null and alternative hypotheses for this test?**
+
+    -   **Null Hypothesis (H₀):** The data is normally distributed.
+
+    <!-- -->
+
+    -   **Alternative Hypothesis (H₁):** The data is not normally distributed.
+
+        If p-value \< 0.05, we reject H₀, meaning the data is likely not normally distributed.
+
+        If p-value ≥ 0.05, we fail to reject H₀, meaning the data may be normally distributed.
+
+        5.  **Interpret the p-values. Are these variables normally distributed?**
+
+        | **Variable** | **W Statistic** | **p-value** | **Normality Conclusion**    |
+        |--------------|-----------------|-------------|-----------------------------|
+        | Ozone        | 0.87867         | 2.79e-08    | Not Normal (p \< 0.05)      |
+        | Temp         | 0.97617         | 0.009319    | Not Normal (p \< 0.05)      |
+        | Solar.R      | 0.94183         | 9.49e-06    | Not Normal (p \< 0.05)      |
+        | Wind         | 0.98575         | 0.1178      | Possibly Normal (p \> 0.05) |
+
+        : Test Results Interpretation
+
+## **Part 2: Data Transformation and Feature Engineering**
+
+6.  **Create a new column with `case_when` tranlating the Months into four seasons (Winter (Nov, Dec, Jan), Spring (Feb, Mar, Apr), Summer (May, Jun, Jul), and Fall (Aug, Sep, Oct)).**
+
+```{r}
+# Creating a Season Column
+airquality <- airquality %>%
+  mutate(Season = case_when(
+    Month %in% c(11, 12, 1) ~ "Winter",
+    Month %in% c(2, 3, 4) ~ "Spring",
+    Month %in% c(5, 6, 7) ~ "Summer",
+    Month %in% c(8, 9, 10) ~ "Fall"
+  ))
+```
+
+7.  **Use `table` to figure out how many observations we have from each season.**
+
+    ```{r}
+    # Counting Observations per Season
+
+    table(airquality$Season)
+    ```
+
+There are 93 Summer observations and 61 observations during Fall.
+
+## **Part 3: Data Preprocessing**
+
+8.  **Normalize the predictor variables (Temp, Solar.R, Wind, and Season) using a `recipe`**
+
+    ```{r}
+    # Normalizing Data
+    recipe <- recipe(Ozone ~ Temp + Solar.R + Wind + Season, data = airquality) %>%
+      step_normalize(all_numeric_predictors()) %>%
+      step_impute_mean(all_numeric_predictors()) %>%
+      step_dummy(all_nominal_predictors())
+    ```
+
+9.  **What is the purpose of normalizing data?**
+
+Normalizing data ensures that all variables contribute equally, preventing large-scale features from dominating models.
+
+10. **What function can be used to impute missing values with the mean?**
+
+    step_impute_mean() function.
+
+11. **`prep` and `bake` the data to generate a processed dataset.**
+
+    ```{r}
+    # Preparing and Applying Recipe
+    prepped_recipe <- prep(recipe, training = airquality)
+    norm_data <- bake(prepped_recipe, new_data = airquality)
+    head(norm_data)
+    ```
+
+I got: Temp, Solar.R, and Wind are normalized, so their values are now scaled around zero. Ozone is still in its original form, and there's one missing value (`NA`). The Season_Summer column is a dummy variable, meaning all these rows are from summer (`1`).
+
+12. **Why is it necessary to both `prep()` and `bake()` the recipe?**
+
+    I would say, `prep()` is like getting everything ready before cooking. it calculates things like the mean for scaling. `bake()` is actually applying those transformations to the data, just like cooking the meal.
+
+## **Part 4: Building a Linear Regression Model**
+
+13. **Fit a linear model using Ozone as the response variable and all other variables as predictors. Remeber that the `.` notation can we used to include all variables.**
+
+```{r}
+model <- lm(Ozone ~ ., data = norm_data)
+summary(model)
+```
+
+13. **Interpret the model summary output (coefficients, R-squared, p-values) in plain language**
+
+The model shows that temperature significantly increases Ozone levels, while wind reduces them. Solar radiation has a moderate effect, but season (Summer) is not significant. The model explains 60% of the Ozone variation, meaning other factors influence it. 37 rows were removed due to missing values, which could impact accuracy. The F-statistic confirms the model is strong, but large residuals suggest possible outliers. To improve, I may consider handling missing data and checking residual plots for better predictions.
+
+## **Part 5: Model Diagnostics**
+
+15. **Use `broom::augment` to suppliment the normalized `data.frame` with the fitted values and residuals.**
+
+```{r}
+# cleaning andExtracting Residuals and Predictions
+clean_data <- na.omit(norm_data)  # Remove missing values first
+predictions <- augment(model, clean_data)
+
+```
+
+15. 
+
+16. **Extract the residuals and visualize their distribution as a histogram and qqplot.**
+
+17. **Use `ggarange` to plot this as one image and interpret what you see in them.**
+
+    ```{r}
+    ### Histogram and QQ-Plot of Residuals
+    p1 <- gghistogram(predictions, x = ".resid", fill = "blue")
+    p2 <- ggqqplot(predictions$.resid)
+    ggarrange(p1, p2, ncol = 2, nrow = 1)
+
+    ```
+
+The residual histogram is right-skewed, suggesting non-normal residuals and potential underprediction in some cases. The Q-Q plot shows deviation in the right tail, indicating outliers or heteroscedasticity. This suggests violations of regression assumptions, possibly affecting accuracy.
+
+18. **Create a scatter plot of actual vs. predicted values using ggpubr**
+
+    ```{r}
+    ggscatter(predictions, x = "Ozone", y = ".fitted", 
+              add = "reg.line", conf.int = TRUE,
+              cor.coef = TRUE, cor.method = "spearman",
+              ellipse = TRUE)
+    ```
+
+<!-- -->
+
+19. **How strong of a model do you think this is?**
+
+    My model explains about 60% of the variation in Ozone levels, meaning there’s still 40% unaccounted for. Temperature and Wind strongly impact Ozone, while Solar Radiation has a smaller effect and Season doesn’t matter much. The residuals are skewed, suggesting outliers or assumption violations. To improve it, I could check for outliers, apply log transformations, or add more predictors like humidity. Overall, it’s a decent model but not perfect, I can definitely make it stronger!
